@@ -1,0 +1,131 @@
+#!/bin/bash
+
+# -[ dependencies ]------------------------------------------- #
+# /
+: "${PROGRAM_AWK:?PROGRAM_AWK is not set}"
+: "${PROGRAM_BC:?PROGRAM_BC is not set}"
+: "${PROGRAM_DIRNAME:?PROGRAM_DIRNAME is not set}"
+: "${PROGRAM_GREP:?PROGRAM_GREP is not set}"
+: "${PROGRAM_HEAD:?PROGRAM_HEAD is not set}"
+: "${PROGRAM_NMCLI:?PROGRAM_NMCLI is not set}"
+: "${PROGRAM_ROFI:?PROGRAM_ROFI is not set}"
+: "${PROGRAM_SED:?PROGRAM_SED is not set}"
+: "${PROGRAM_UNIQ:?PROGRAM_UNIQ is not set}"
+: "${PROGRAM_WC:?PROGRAM_WC is not set}"
+# \
+# -[ dependencies ]------------------------------------------- #
+
+
+# -[ parse arguments ]---------------------------------------- #
+# /
+if [[ " $* " == *" --help "* ]]; then
+  echo "Usage:"
+  echo "  rofi-wifi-menu"
+  echo ""
+  echo "Show WiFi SSIDs with Rofi."
+  exit 0
+fi
+# \
+# -[ parse arguments ]---------------------------------------- #
+
+
+# -[ program config ]----------------------------------------- #
+# /
+DIR="$( cd "$( $PROGRAM_DIRNAME "${BASH_SOURCE[0]}" )" && pwd )"
+FIELDS=SSID,SECURITY
+POSITION=0
+YOFF=0
+XOFF=0
+# \
+# -[ program config ]----------------------------------------- #
+
+
+# -[ user config ]-------------------------------------------- #
+# /
+USER_CONFIG="$HOME/.config/rofi-wifi-menu/config"
+if [[ -f $USER_CONFIG ]]; then
+  source $USER_CONFIG
+else
+  echo "Warning: User config file \'$USER_CONFIG\' not found."
+fi
+# \
+# -[ user config ]-------------------------------------------- #
+
+
+# -[ main ]--------------------------------------------------- #
+# /
+# Starts a scan of available broadcasting SSIDs
+# nmcli dev wifi rescan
+LIST=$($PROGRAM_NMCLI --fields "$FIELDS" device wifi list | $PROGRAM_SED '/^--/d')
+# For some reason rofi always approximates character width 2 short... hmmm
+RWIDTH=$(($(echo "$LIST" | $PROGRAM_HEAD -n 1 | $PROGRAM_AWK '{print length($0); }')+2))
+# Dynamically change the height of the rofi menu
+LINENUM=$(echo "$LIST" | $PROGRAM_WC -l)
+# Gives a list of known connections so we can parse it later
+KNOWNCON=$($PROGRAM_NMCLI connection show)
+# Really janky way of telling if there is currently a connection
+CONSTATE=$($PROGRAM_NMCLI -fields WIFI g)
+
+CURRSSID=$(LANGUAGE=C $PROGRAM_NMCLI -t -f active,ssid dev wifi | $PROGRAM_AWK -F: '$1 ~ /^yes/ {print $2}')
+
+if [[ ! -z $CURRSSID ]]; then
+	HIGHLINE=$(echo  "$(echo "$LIST" | $PROGRAM_AWK -F "[  ]{2,}" '{print $1}' | $PROGRAM_GREP -Fxn -m 1 "$CURRSSID" | $PROGRAM_AWK -F ":" '{print $1}') + 1" | $PROGRAM_BC )
+fi
+
+# HOPEFULLY you won't need this as often as I do
+# If there are more than 8 SSIDs, the menu will still only have 8 lines
+if [ "$LINENUM" -gt 8 ] && [[ "$CONSTATE" =~ "enabled" ]]; then
+	LINENUM=8
+elif [[ "$CONSTATE" =~ "disabled" ]]; then
+	LINENUM=1
+fi
+
+
+if [[ "$CONSTATE" =~ "enabled" ]]; then
+	TOGGLE="toggle off"
+elif [[ "$CONSTATE" =~ "disabled" ]]; then
+	TOGGLE="toggle on"
+fi
+
+
+CHENTRY=$(echo -e "$TOGGLE\nmanual\n$LIST" | $PROGRAM_UNIQ -u | $PROGRAM_ROFI -dmenu -p "Wi-Fi SSID: " -lines "$LINENUM" -a "$HIGHLINE" -location "$POSITION" -yoffset "$YOFF" -xoffset "$XOFF" -width -"$RWIDTH")
+CHSSID=$(echo "$CHENTRY" | $PROGRAM_SED  's/\s\{2,\}/\|/g' | $PROGRAM_AWK -F "|" '{print $1}')
+
+# If the user inputs "manual" as their SSID in the start window, it will bring them to this screen
+if [ "$CHENTRY" = "manual" ] ; then
+	# Manual entry of the SSID and password (if appplicable)
+	MSSID=$(echo "enter the SSID of the network (SSID,password)" | $PROGRAM_ROFI -dmenu -p "Manual Entry: " -lines 1)
+	# Separating the password from the entered string
+	MPASS=$(echo "$MSSID" | $PROGRAM_AWK -F "," '{print $2}')
+
+	# If the user entered a manual password, then use the password nmcli command
+	if [ "$MPASS" = "" ]; then
+		$PROGRAM_NMCLI dev wifi con "$MSSID"
+	else
+		$PROGRAM_NMCLI dev wifi con "$MSSID" password "$MPASS"
+	fi
+
+elif [ "$CHENTRY" = "toggle on" ]; then
+	$PROGRAM_NMCLI radio wifi on
+
+elif [ "$CHENTRY" = "toggle off" ]; then
+	$PROGRAM_NMCLI radio wifi off
+
+else
+	# If the connection is already in use, then this will still be able to get the SSID
+	if [ "$CHSSID" = "*" ]; then
+		CHSSID=$(echo "$CHENTRY" | $PROGRAM_SED  's/\s\{2,\}/\|/g' | $PROGRAM_AWK -F "|" '{print $3}')
+	fi
+
+	# Parses the list of preconfigured connections to see if it already contains the chosen SSID. This speeds up the connection process
+	if [[ $(echo "$KNOWNCON" | $PROGRAM_GREP "$CHSSID") = "$CHSSID" ]]; then
+		$PROGRAM_NMCLI con up "$CHSSID"
+	else
+		if [[ "$CHENTRY" =~ "WPA2" ]] || [[ "$CHENTRY" =~ "WEP" ]]; then
+			WIFIPASS=$(echo "If connection is stored, hit enter" | $PROGRAM_ROFI -dmenu -p "password: " -lines 1 )
+		fi
+		$PROGRAM_NMCLI dev wifi con "$CHSSID" password "$WIFIPASS"
+	fi
+fi
+# \
+# -[ main ]--------------------------------------------------- #

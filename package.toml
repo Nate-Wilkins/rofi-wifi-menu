@@ -1,0 +1,12 @@
+name               = "rofi-wifi-menu"
+version            = "0.1.0"
+description        = "Rofi program to show WiFi SSIDs."
+author             = [
+  "Nate-Wilkins <nate-wilkins@code-null.com>",
+  "mateossh",
+  "kevinoliveira <kevin.oliveira@live.com>",
+  "tnymlr",
+  "bricewge <brice@waegenei.re>",
+  "zbaylin <me@zachbayl.in>"
+]
+
