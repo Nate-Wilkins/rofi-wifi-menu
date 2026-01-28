@@ -1,5 +1,5 @@
 name               = "rofi-wifi-menu"
-version            = "0.1.0"
+version            = "0.2.0"
 description        = "Rofi program to show WiFi SSIDs."
 author             = [
   "Nate-Wilkins <nate-wilkins@code-null.com>",
